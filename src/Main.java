@@ -7,7 +7,7 @@ import java.util.stream.IntStream;
 
 public class Main {
 
-	public static void main(String[] args) {
+	public static void main(String[] args) throws ExecutionException, InterruptedException {
 
 		Calendar start = Calendar.getInstance();
 
@@ -17,17 +17,25 @@ public class Main {
 		ExecutorService executorCalculate = Executors.newFixedThreadPool(20);
 
 
-		List<CompletableFuture<CalculateResult>> calculateResult = IntStream.range(0, TASK_NUMBER)
+		List<CompletableFuture<CalculateResult>> futureCalculateResults = IntStream.range(0, TASK_NUMBER)
 				.mapToObj(i -> CompletableFuture.supplyAsync(() -> new Download(i), executorDownload)
 						.thenApplyAsync(Main::calculateResultFuture, executorCalculate))
 				.collect(Collectors.toList());
 
-		long count = calculateResult.stream().filter(Main::isFutureCalculated).count();
+		CompletableFuture<Long> countFuture = CompletableFuture
+				.allOf(futureCalculateResults.toArray(new CompletableFuture[0]))
+				.thenApply(v ->
+						futureCalculateResults.stream()
+								.map(CompletableFuture::join)
+								.collect(Collectors.toList()))
+				.thenApply(calculateResults -> calculateResults.stream()
+						.filter(calculateResult -> calculateResult.found)
+						.count());
 
 		executorDownload.shutdown();
 		executorCalculate.shutdown();
 
-		System.out.println("Total success checks: " + count);
+		System.out.println("Total success checks: " + countFuture.get());
 
 		Calendar stop = Calendar.getInstance();
 
@@ -37,14 +45,5 @@ public class Main {
 
 	public static CalculateResult calculateResultFuture(Download download) {
 		return new Calculate((download.call())).call();
-	}
-
-	public static boolean isFutureCalculated(Future<CalculateResult> future) {
-		try {
-			return future.get().found;
-		} catch (InterruptedException | ExecutionException e) {
-			e.printStackTrace();
-		}
-		return false;
 	}
 }
